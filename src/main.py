@@ -3,7 +3,7 @@ import sys
 
 
 MODELICA_CODE = """
-model {model_name} ""
+model {model_name} "{name}"
 
 {constant_parameters}
 
@@ -117,13 +117,15 @@ class SBMLModel:
     def create_sum_from_reactant(self, specie_name, specie_obj):
         formula_list = []
         for reaction_id, stoichiometry_value in specie_obj.involved_as_reactant:
-            formula_list.append(f"({stoichiometry_value} * {self.reactions[reaction_id].math_formula})")
+            stoichiometry_value = str(stoichiometry_value) + " * " if stoichiometry_value != 1.0 else ""
+            formula_list.append(f"({stoichiometry_value}{self.reactions[reaction_id].math_formula})")
         return " - ".join(formula_list)
 
     def create_sum_from_products(self, specie_name, specie_obj):
         formula_list = []
         for reaction_id, stoichiometry_value in specie_obj.involved_as_product:
-            formula_list.append(f"({stoichiometry_value} * {self.reactions[reaction_id].math_formula})")
+            stoichiometry_value = str(stoichiometry_value) + " * " if stoichiometry_value != 1.0 else ""
+            formula_list.append(f"({stoichiometry_value}{self.reactions[reaction_id].math_formula})")
         return " + ".join(formula_list)
 
     def create_rate_rule(self):
@@ -193,8 +195,12 @@ class SBMLTranslator:
         initialequation_list = "\n".join(self.getinitialequation_modelica_code())
         assignmentrules_list = "\n".join(self.getassignmentrules_modelica_code())
         raterules_list = "\n".join(self.getraterules_modelica_code())
+        for comp in self.model.compartments:
+            raterules_list = raterules_list.replace(comp + " * ", "")
+            raterules_list = raterules_list.replace(" * " + comp, "")
         return MODELICA_CODE.format(
             model_name=model_name,
+            name=self.model.name,
             constant_parameters=constant_parameter_list,
             variable_parameters=variable_parameter_list,
             species=species_list,
@@ -316,6 +322,16 @@ class SBMLExtrapolator:
         return modifiers
 
 
+def save_modelica(modelica_model, modelica_file):
+    try:
+        stream = open(modelica_file, mode="x")
+    except FileExistsError:
+        stream = open(modelica_file, mode="w")
+    stream.write(modelica_model)
+    stream.flush()
+    stream.close()
+    
+
 if __name__ == "__main__":
     try:
         modelname = sys.argv[1]
@@ -329,6 +345,6 @@ if __name__ == "__main__":
                              )
         sbmltrans = SBMLTranslator(modelname, sbmlmodel)
         modelica_translation = sbmltrans.SBML_into_Modelica()
-        print(modelica_translation)
+        save_modelica(modelica_translation, modelname.replace(".xml", ".mo"))
     except Exception as e:
         print(e)
