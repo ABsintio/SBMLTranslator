@@ -2,6 +2,26 @@ import libsbml
 import sys
 
 
+MODELICA_CODE = """
+model {model_name} ""
+
+{constant_parameters}
+
+{variable_parameters}
+
+{species}
+
+initial equation
+{initial_equations}
+
+equation
+{assignment_rules}
+{rate_rules}
+
+end {model_name};
+"""
+
+
 def obj2str(obj):
     args = ",".join([f"{k}={v}" for k, v in obj.__dict__.items()])
     return f"{obj.__class__.__name__}({args})"
@@ -104,17 +124,21 @@ class SBMLModel:
         formula_list = []
         for reaction_id, stoichiometry_value in specie_obj.involved_as_product:
             formula_list.append(f"({stoichiometry_value} * {self.reactions[reaction_id].math_formula})")
-        return " - ".join(formula_list)
+        return " + ".join(formula_list)
 
     def create_rate_rule(self):
         self.rate_rules_dict = dict()
         for specie_id, specie_obj in self.species.items():
             rate_rule = RateRule(specie_id, "0.0")
             if not specie_obj.constant:
-                reactant_formula = self.create_sum_from_reactant(specie_id, specie_obj)
+                reactant_partial = self.create_sum_from_reactant(specie_id, specie_obj)
+                reactant_formula = "- " + reactant_partial if reactant_partial != "" else reactant_partial
                 product_formula = self.create_sum_from_products(specie_id, specie_obj)
-                rate_rule = RateRule(specie_id, f"{product_formula} - {reactant_formula}")
+                rate_rule = RateRule(specie_id, f"{product_formula} {reactant_formula}")
             self.rate_rules_dict[specie_id] = rate_rule
+
+    def getconstant_parameter(self):
+        return [param for k, param in self.parameters if k not in self.assignment_rules.keys()]
 
     def __str__(self):
         printable = ""
@@ -128,8 +152,56 @@ class SBMLModel:
 
 
 class SBMLTranslator:
-    def __init__(self, *args, **kargs):
-        pass
+    def __init__(self, filename, sbmlmodel_obj):
+        self.model = sbmlmodel_obj
+        self.filename = filename
+
+    def getconstant_parameter_modelica_code(self):
+        line_code = " "*4 + "parameter Real {param_name} = {param_value};"
+        lines = []
+        for param_id, param_obj in self.model.parameters.items():
+            if param_obj.constant:
+                lines.append(line_code.format(param_name=param_id, param_value=param_obj.value))
+        return lines
+
+    def getvariable_parameter_modelica_code(self):
+        line_code = " "*4 + "Real {param_name}(start={ivalue});"
+        lines = []
+        for param_id, param_obj in self.model.parameters.items():
+            if not param_obj.constant:
+                lines.append(line_code.format(param_name=param_id, ivalue=param_obj.value))
+        return lines
+
+    def getspecies_modelica_code(self):
+        return [f"    Real {name};" for name in self.model.species]
+
+    def getinitialequation_modelica_code(self):
+        return [f"    {name} = {species.ivalue};" for name, species in self.model.species.items()]
+    
+    def getraterules_modelica_code(self):
+        return [f"    {rate_rule.lhs} = {rate_rule.rhs}" for rate_rule in self.model.rate_rules_dict.values()]
+
+    def getassignmentrules_modelica_code(self):
+        return [f"    {assignment_rule.lhs} = {assignment_rule.rhs}" for assignment_rule in self.model.assignment_rules.values()]
+    
+    def SBML_into_Modelica(self):
+        global MODELICA_CODE
+        model_name = self.filename.split("/")[-1][:-4]
+        constant_parameter_list = "\n".join(self.getconstant_parameter_modelica_code())
+        variable_parameter_list = "\n".join(self.getvariable_parameter_modelica_code())
+        species_list = "\n".join(self.getspecies_modelica_code())
+        initialequation_list = "\n".join(self.getinitialequation_modelica_code())
+        assignmentrules_list = "\n".join(self.getassignmentrules_modelica_code())
+        raterules_list = "\n".join(self.getraterules_modelica_code())
+        return MODELICA_CODE.format(
+            model_name=model_name,
+            constant_parameters=constant_parameter_list,
+            variable_parameters=variable_parameter_list,
+            species=species_list,
+            initial_equations=initialequation_list,
+            assignment_rules=assignmentrules_list,
+            rate_rules=raterules_list
+        )
 
 
 class SBMLExtrapolator:
@@ -255,7 +327,8 @@ if __name__ == "__main__":
                               sbmlext.assignment_dict,
                               sbmlext.reaction_dict
                              )
-        print(sbmlmodel)
+        sbmltrans = SBMLTranslator(modelname, sbmlmodel)
+        modelica_translation = sbmltrans.SBML_into_Modelica()
+        print(modelica_translation)
     except Exception as e:
         print(e)
-        print("Devi inserire come argomenti il path del modello")
