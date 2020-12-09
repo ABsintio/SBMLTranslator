@@ -65,7 +65,7 @@ class Reaction:
         return obj2str(self)
 
 
-class AssignmentRule:
+class Rule:
     def __init__(self, lhs, rhs):
         self.lhs = lhs
         self.rhs = rhs
@@ -74,9 +74,57 @@ class AssignmentRule:
         return obj2str(self)
 
 
+class AssignmentRule(Rule):
+    def __init__(self, lhs, rhs):
+        super().__init__(lhs, rhs)
+
+    
+class RateRule(Rule):
+    def __init__(self, lhs, rhs):
+        super().__init__(f"der({lhs})", rhs)
+
+
 class SBMLModel:
-    def __init__(self, *args, **kargs):
-        pass
+    def __init__(self, name, compartmnents, species, parameters, assignment_rules, reactions):
+        self.name = name
+        self.compartments = compartmnents
+        self.species = species
+        self.parameters = parameters
+        self.assignment_rules = assignment_rules
+        self.reactions = reactions
+        self.create_rate_rule()
+
+    def create_sum_from_reactant(self, specie_name, specie_obj):
+        formula_list = []
+        for reaction_id, stoichiometry_value in specie_obj.involved_as_reactant:
+            formula_list.append(f"({stoichiometry_value} * {self.reactions[reaction_id].math_formula})")
+        return " - ".join(formula_list)
+
+    def create_sum_from_products(self, specie_name, specie_obj):
+        formula_list = []
+        for reaction_id, stoichiometry_value in specie_obj.involved_as_product:
+            formula_list.append(f"({stoichiometry_value} * {self.reactions[reaction_id].math_formula})")
+        return " - ".join(formula_list)
+
+    def create_rate_rule(self):
+        self.rate_rules_dict = dict()
+        for specie_id, specie_obj in self.species.items():
+            rate_rule = RateRule(specie_id, "0.0")
+            if not specie_obj.constant:
+                reactant_formula = self.create_sum_from_reactant(specie_id, specie_obj)
+                product_formula = self.create_sum_from_products(specie_id, specie_obj)
+                rate_rule = RateRule(specie_id, f"{product_formula} - {reactant_formula}")
+            self.rate_rules_dict[specie_id] = rate_rule
+
+    def __str__(self):
+        printable = ""
+        for v in self.__dict__.values():
+            if isinstance(v, str):
+                printable += f"Model Name: {v}\n"
+            if isinstance(v, dict):
+                printable += "\n".join([x.__str__() for x in v.values()])
+            printable += "\n\n"
+        return printable
 
 
 class SBMLTranslator:
@@ -195,22 +243,19 @@ class SBMLExtrapolator:
             self.species_dict[modif.getSpecies()].add_reaction_as_modifier(reaction_name)
         return modifiers
 
-    def __str__(self):
-        printable = ""
-        for v in self.__dict__.values():
-            if isinstance(v, str):
-                printable += f"Model Name: {v}\n"
-            if isinstance(v, dict):
-                printable += "\n".join([x.__str__() for x in v.values()])
-            printable += "\n\n"
-        return printable
-
 
 if __name__ == "__main__":
     try:
         modelname = sys.argv[1]
         sbmlext = SBMLExtrapolator(modelname)
-        print(sbmlext)
+        sbmlmodel = SBMLModel(sbmlext.nome, 
+                              sbmlext.comp_dict, 
+                              sbmlext.species_dict,
+                              sbmlext.parameter_dict,
+                              sbmlext.assignment_dict,
+                              sbmlext.reaction_dict
+                             )
+        print(sbmlmodel)
     except Exception as e:
         print(e)
         print("Devi inserire come argomenti il path del modello")
