@@ -3,6 +3,7 @@ import sys
 import os
 import functools
 import time
+import argparse
 
 
 MODELICA_CODE = """
@@ -200,7 +201,6 @@ class SBMLTranslator:
     
     def SBML_into_Modelica(self):
         global MODELICA_CODE
-        model_name = self.filename.split("/")[-1][:-4]
         constant_parameter_list = "\n".join(self.getconstant_parameter_modelica_code())
         variable_parameter_list = "\n".join(self.getvariable_parameter_modelica_code())
         species_list = "\n".join(self.getspecies_modelica_code())
@@ -211,7 +211,7 @@ class SBMLTranslator:
             raterules_list = raterules_list.replace(comp + " * ", "")
             raterules_list = raterules_list.replace(" * " + comp, "")
         return MODELICA_CODE.format(
-            model_name=model_name,
+            model_name=self.filename,
             name=self.model.name,
             constant_parameters=constant_parameter_list,
             variable_parameters=variable_parameter_list,
@@ -365,28 +365,57 @@ def wrap_time(f):
 
 
 @wrap_time
-def run(directory):
+def run_from_directory(directory, output_directory):
     for file in os.listdir(directory):
         if file.endswith(".sbml") or file.endswith(".xml"):
             new_path = os.path.join(directory, file)
-            print("Traduzione SBML->Modelica: " + new_path)
-            sbmlext = SBMLExtrapolator(new_path)
-            sbmlmodel = SBMLModel(sbmlext.nome, 
-                                sbmlext.comp_dict, 
-                                sbmlext.species_dict,
-                                sbmlext.parameter_dict,
-                                sbmlext.assignment_dict,
-                                sbmlext.reaction_dict,
-                                sbmlext.rate_dict
-                                )
-            sbmltrans = SBMLTranslator(modelname, sbmlmodel)
-            modelica_translation = sbmltrans.SBML_into_Modelica()
-            save_modelica(modelica_translation, new_path.replace(".sbml", ".mo"))
-    
+            run(new_path, output_directory)
 
-if __name__ == "__main__":
-    try:
-        modelname = sys.argv[1]
-        run(modelname)
-    except Exception as e:
-        print(e)
+
+@wrap_time
+def run_for_single_file(file, output_directory):
+	run(file, output_directory)
+
+
+def run(file, output_directory):
+	sbmlext = SBMLExtrapolator(file)
+	sbmlmodel = SBMLModel(
+		sbmlext.nome, 
+		sbmlext.comp_dict, 
+		sbmlext.species_dict,
+		sbmlext.parameter_dict,
+		sbmlext.assignment_dict,
+		sbmlext.reaction_dict,
+		sbmlext.rate_dict
+	)
+	final_index = -5 if file.endswith(".sbml") else -4
+	filename = file.split("/")[-1][:final_index]
+	save_directory = os.path.join(output_directory, sbmlmodel.name)
+	modelica_file = os.path.join(save_directory, filename + ".mo")
+	print(f"Traduzione SBML->Modelica: {file} -> {modelica_file}")
+	sbmltrans = SBMLTranslator(filename, sbmlmodel)
+	modelica_translation = sbmltrans.SBML_into_Modelica()
+	try:	
+		os.mkdir(save_directory)
+	except FileExistsError:
+		pass
+	save_modelica(modelica_translation, modelica_file)
+
+
+def main():
+	argument_parser = argparse.ArgumentParser()
+	argument_parser.add_argument("-d", "--directory", help="Path assoluto della directory contenente i file SBML o XML", type=str)
+	argument_parser.add_argument("-s", "--sbml", help="Path assoluto o relativo al file SBML o XML", type=str)
+	argument_parser.add_argument("-o", "--output", help="Path assoluto o relativo della cartella in cui salvare il modello tradotto", type=str, required=True)
+	args = argument_parser.parse_args()
+	directory = args.directory
+	sbmlfile = args.sbml
+	output_dir = args.output
+	# Se l'argomenti d non è vuoto allora run_from_directory
+	# anche se -s non è vuoto
+	if directory != None and directory != "":
+		run_from_directory(directory, output_dir)
+	else:
+		run_for_single_file(sbmlfile, output_dir)
+
+main()
