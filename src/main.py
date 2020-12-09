@@ -1,5 +1,8 @@
 import libsbml
 import sys
+import os
+import functools
+import time
 
 
 MODELICA_CODE = """
@@ -28,11 +31,12 @@ def obj2str(obj):
 
 
 class Specie:
-    def __init__(self, nome, compartment, ivalue, constant):
+    def __init__(self, nome, compartment, ivalue, constant, boundary_condition):
         self.nome = nome
         self.compartment = compartment
         self.ivalue = ivalue
         self.constant = constant
+        self.boundary_condition = boundary_condition
         self.involved_as_reactant = []
         self.involved_as_product = []
         self.involved_as_modifier = []
@@ -105,13 +109,21 @@ class RateRule(Rule):
 
 
 class SBMLModel:
-    def __init__(self, name, compartmnents, species, parameters, assignment_rules, reactions):
+    def __init__(self, name, 
+                       compartmnents, 
+                       species, 
+                       parameters, 
+                       assignment_rules, 
+                       reactions,
+                       rate_rules
+                ):
         self.name = name
         self.compartments = compartmnents
         self.species = species
         self.parameters = parameters
         self.assignment_rules = assignment_rules
         self.reactions = reactions
+        self.rate_rules_dict = rate_rules
         self.create_rate_rule()
 
     def create_sum_from_reactant(self, specie_name, specie_obj):
@@ -129,15 +141,15 @@ class SBMLModel:
         return " + ".join(formula_list)
 
     def create_rate_rule(self):
-        self.rate_rules_dict = dict()
         for specie_id, specie_obj in self.species.items():
-            rate_rule = RateRule(specie_id, "0.0")
-            if not specie_obj.constant:
-                reactant_partial = self.create_sum_from_reactant(specie_id, specie_obj)
-                reactant_formula = "- " + reactant_partial if reactant_partial != "" else reactant_partial
-                product_formula = self.create_sum_from_products(specie_id, specie_obj)
-                rate_rule = RateRule(specie_id, f"{product_formula} {reactant_formula}")
-            self.rate_rules_dict[specie_id] = rate_rule
+            if specie_id not in self.rate_rules_dict:
+                rate_rule = RateRule(specie_id, "0.0")
+                if not specie_obj.constant and not specie_obj.boundary_condition:
+                    reactant_partial = self.create_sum_from_reactant(specie_id, specie_obj)
+                    reactant_formula = "- " + reactant_partial if reactant_partial != "" else reactant_partial
+                    product_formula = self.create_sum_from_products(specie_id, specie_obj)
+                    rate_rule = RateRule(specie_id, f"{product_formula} {reactant_formula}")
+                self.rate_rules_dict[specie_id] = rate_rule
 
     def getconstant_parameter(self):
         return [param for k, param in self.parameters if k not in self.assignment_rules.keys()]
@@ -181,7 +193,7 @@ class SBMLTranslator:
         return [f"    {name} = {species.ivalue};" for name, species in self.model.species.items()]
     
     def getraterules_modelica_code(self):
-        return [f"    {rate_rule.lhs} = {rate_rule.rhs}" for rate_rule in self.model.rate_rules_dict.values()]
+        return [f"    {rate_rule.lhs} = {rate_rule.rhs}" for rate_rule in self.model.rate_rules_dict.values() if rate_rule.lhs[4:-1] not in self.model.assignment_rules.keys()]
 
     def getassignmentrules_modelica_code(self):
         return [f"    {assignment_rule.lhs} = {assignment_rule.rhs}" for assignment_rule in self.model.assignment_rules.values()]
@@ -245,7 +257,8 @@ class SBMLExtrapolator:
                 sp.getId(), # Nome
                 self.comp_dict[sp.getCompartment()], # Oggetto Compartment
                 sp.getInitialConcentration(), # Concentrazione iniziale
-                sp.getConstant() # Se è costante oppure no
+                sp.getConstant(), # Se è costante oppure no
+                sp.getBoundaryCondition()
             )
 
     def getparameters(self):
@@ -260,6 +273,7 @@ class SBMLExtrapolator:
            
     def getrules(self):
         self._assignment_rule()
+        self._rate_rule()
 
     def _assignment_rule(self):
         self.assignment_dict = dict()
@@ -267,6 +281,14 @@ class SBMLExtrapolator:
             if isinstance(rule, libsbml.AssignmentRule):
                 self.assignment_dict[rule.getVariable()] = AssignmentRule(
                     rule.getVariable(), rule.getFormula())
+    
+    def _rate_rule(self):
+        self.rate_dict = dict()
+        for rule in self.model.getListOfRules():
+            if isinstance(rule, libsbml.RateRule):
+                self.rate_dict[rule.getVariable()] = RateRule(
+                    rule.getVariable(), rule.getFormula()
+                )
 
     def getreactions(self):
         self.reaction_dict = dict()
@@ -330,21 +352,41 @@ def save_modelica(modelica_model, modelica_file):
     stream.write(modelica_model)
     stream.flush()
     stream.close()
+
+
+def wrap_time(f):
+    @functools.wraps(f)
+    def wrapper(*args, **kargs):
+        start = time.time()
+        f(*args, **kargs)
+        end = time.time()
+        print("Tempo totale di traduzione: " + str(end - start))
+    return wrapper
+
+
+@wrap_time
+def run(directory):
+    for file in os.listdir(directory):
+        if file.endswith(".sbml") or file.endswith(".xml"):
+            new_path = os.path.join(directory, file)
+            print("Traduzione SBML->Modelica: " + new_path)
+            sbmlext = SBMLExtrapolator(new_path)
+            sbmlmodel = SBMLModel(sbmlext.nome, 
+                                sbmlext.comp_dict, 
+                                sbmlext.species_dict,
+                                sbmlext.parameter_dict,
+                                sbmlext.assignment_dict,
+                                sbmlext.reaction_dict,
+                                sbmlext.rate_dict
+                                )
+            sbmltrans = SBMLTranslator(modelname, sbmlmodel)
+            modelica_translation = sbmltrans.SBML_into_Modelica()
+            save_modelica(modelica_translation, new_path.replace(".sbml", ".mo"))
     
 
 if __name__ == "__main__":
     try:
         modelname = sys.argv[1]
-        sbmlext = SBMLExtrapolator(modelname)
-        sbmlmodel = SBMLModel(sbmlext.nome, 
-                              sbmlext.comp_dict, 
-                              sbmlext.species_dict,
-                              sbmlext.parameter_dict,
-                              sbmlext.assignment_dict,
-                              sbmlext.reaction_dict
-                             )
-        sbmltrans = SBMLTranslator(modelname, sbmlmodel)
-        modelica_translation = sbmltrans.SBML_into_Modelica()
-        save_modelica(modelica_translation, modelname.replace(".xml", ".mo"))
+        run(modelname)
     except Exception as e:
         print(e)
