@@ -19,6 +19,8 @@ initial equation
 {initial_equations}
 
 equation
+{events}
+
 {assignment_rules}
 {rate_rules}
 
@@ -109,6 +111,16 @@ class RateRule(Rule):
         super().__init__(f"der({lhs})", rhs)
 
 
+class Event:
+    def __init__(self, id, trigger_condition, event_assignments):
+        self.id = id
+        self.when_condition = trigger_condition
+        self.event_assignments = event_assignments
+    
+    def __str__(self):
+        return obj2str(self)
+
+
 class SBMLModel:
     def __init__(self, name, 
                        compartmnents, 
@@ -116,7 +128,8 @@ class SBMLModel:
                        parameters, 
                        assignment_rules, 
                        reactions,
-                       rate_rules
+                       rate_rules,
+                       event_list
                 ):
         self.name = name
         self.compartments = compartmnents
@@ -125,6 +138,7 @@ class SBMLModel:
         self.assignment_rules = assignment_rules
         self.reactions = reactions
         self.rate_rules_dict = rate_rules
+        self.event_list = event_list
         self.create_rate_rule()
 
     def create_sum_from_reactant(self, specie_name, specie_obj):
@@ -198,6 +212,16 @@ class SBMLTranslator:
 
     def getassignmentrules_modelica_code(self):
         return [f"    {assignment_rule.lhs} = {assignment_rule.rhs}" for assignment_rule in self.model.assignment_rules.values()]
+
+    def getevents_modelica_code(self):
+        line_code = " "*4 + "when {when_condition} then\n"
+        lines = []
+        for event_obj in self.model.event_list.values():
+            code = line_code.format(when_condition=event_obj.when_condition) + \
+                "\n".join([f"        {ass};" for ass in event_obj.event_assignments]) + \
+                    "\n    end when;"
+            lines.append(code)
+        return lines
     
     def SBML_into_Modelica(self):
         global MODELICA_CODE
@@ -207,6 +231,7 @@ class SBMLTranslator:
         initialequation_list = "\n".join(self.getinitialequation_modelica_code())
         assignmentrules_list = "\n".join(self.getassignmentrules_modelica_code())
         raterules_list = "\n".join(self.getraterules_modelica_code())
+        events_list = "\n".join(self.getevents_modelica_code())
         for comp in self.model.compartments:
             raterules_list = raterules_list.replace(comp + " * ", "")
             raterules_list = raterules_list.replace(" * " + comp, "")
@@ -217,6 +242,7 @@ class SBMLTranslator:
             variable_parameters=variable_parameter_list,
             species=species_list,
             initial_equations=initialequation_list,
+            events=events_list,
             assignment_rules=assignmentrules_list,
             rate_rules=raterules_list
         )
@@ -234,6 +260,7 @@ class SBMLExtrapolator:
         self.getparameters()
         self.getrules()
         self.getreactions()
+        self.getevents()
     
     def getmodelname(self):
         self.nome = self.model.getName()
@@ -295,7 +322,7 @@ class SBMLExtrapolator:
         for reaction in self.model.getListOfReactions():
             reaction_name = reaction.getId()
             second_reaction_name = reaction.getName()
-            kinetic_law = reaction.getKineticLaw().getFormula()
+            kinetic_law = libsbml.formulaToL3String(reaction.getKineticLaw().getMath())
             reactants = self.get_and_set(reaction_name, reaction.getListOfReactants(), "r")
             products = self.get_and_set(reaction_name, reaction.getListOfProducts(), "p")
             modifiers = self.get_and_set_modifier(reaction, reaction_name)
@@ -343,6 +370,17 @@ class SBMLExtrapolator:
             self.species_dict[modif.getSpecies()].add_reaction_as_modifier(reaction_name)
         return modifiers
 
+    def getevents(self):
+        self.event_dict = dict()
+        for event in self.model.getListOfEvents():
+            event_id = event.getId()
+            when_condition = libsbml.formulaToL3String(event.getTrigger().getMath())
+            # Dal momento che gli and e gli or sono rappresentati come && e || allora li 
+            # sostituiamo con and e or i quali sono leggibili da modelica.
+            when_condition = when_condition.replace("&&", "and").replace("||", "or")
+            event_assignments = [f"{ass.getId()} = {libsbml.formulaToL3String(ass.getMath())}" for ass in event.getListOfEventAssignments()]
+            self.event_dict[event_id] = Event(event_id, when_condition, event_assignments)
+
 
 def save_modelica(modelica_model, modelica_file):
     try:
@@ -378,28 +416,29 @@ def run_for_single_file(file, output_directory):
 
 
 def run(file, output_directory):
-	sbmlext = SBMLExtrapolator(file)
-	sbmlmodel = SBMLModel(
-		sbmlext.nome, 
-		sbmlext.comp_dict, 
-		sbmlext.species_dict,
-		sbmlext.parameter_dict,
-		sbmlext.assignment_dict,
-		sbmlext.reaction_dict,
-		sbmlext.rate_dict
-	)
-	final_index = -5 if file.endswith(".sbml") else -4
-	filename = file.split("/")[-1][:final_index]
-	save_directory = os.path.join(output_directory, sbmlmodel.name)
-	modelica_file = os.path.join(save_directory, filename + ".mo")
-	print(f"Traduzione SBML->Modelica: {file} -> {modelica_file}")
-	sbmltrans = SBMLTranslator(filename, sbmlmodel)
-	modelica_translation = sbmltrans.SBML_into_Modelica()
-	try:	
-		os.mkdir(save_directory)
-	except FileExistsError:
-		pass
-	save_modelica(modelica_translation, modelica_file)
+    sbmlext = SBMLExtrapolator(file)
+    sbmlmodel = SBMLModel(
+        sbmlext.nome, 
+        sbmlext.comp_dict, 
+        sbmlext.species_dict,
+        sbmlext.parameter_dict,
+        sbmlext.assignment_dict,
+        sbmlext.reaction_dict,
+        sbmlext.rate_dict,
+        sbmlext.event_dict
+    )
+    final_index = -5 if file.endswith(".sbml") else -4
+    filename = file.split("/")[-1][:final_index]
+    save_directory = os.path.join(output_directory, sbmlmodel.name)
+    modelica_file = os.path.join(save_directory, filename + ".mo")
+    print(f"Traduzione SBML->Modelica: {file} -> {modelica_file}")
+    sbmltrans = SBMLTranslator(filename, sbmlmodel)
+    modelica_translation = sbmltrans.SBML_into_Modelica()
+    try:	
+        os.mkdir(save_directory)
+    except FileExistsError:
+        pass
+    save_modelica(modelica_translation, modelica_file)
 
 
 def main():
