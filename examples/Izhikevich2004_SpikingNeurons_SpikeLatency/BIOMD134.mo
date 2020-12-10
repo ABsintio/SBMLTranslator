@@ -1,6 +1,14 @@
 
 model BIOMD134 "Izhikevich2004_SpikingNeurons_SpikeLatency"
 
+    function pow
+        input  Real x;
+        input  Real power;
+        output Real y;
+        algorithm
+            y := x^power;
+    end pow;
+
     parameter Real a = 0.02;
     parameter Real b = 0.2;
     parameter Real c = -65.0;
