@@ -1,6 +1,16 @@
 
 model BIOMD088 "Maeda2006_MyosinPhosphorylation"
 
+    function pow
+        input  Real x;
+        input  Real power;
+        output Real y;
+        algorithm
+            y := x^power;
+    end pow;
+    
+    input Real assign_s2;
+
     parameter Real Km = 10.019;
     parameter Real ratio = 1.7299;
     parameter Real Vmax = 3.67;
@@ -332,7 +342,7 @@ equation
     der(s570) = (Vmax * s463) + (Vmax * s496) + (Vmax * s467) + (Vmax * s477) - (((1 + ratio) * Vmax * s360 * s570 / Km - Vmax * ratio * s467)) - (((1 + ratio) * Vmax * s359 * s570 / Km - Vmax * ratio * s477)) - (kf * s570);
 
     when time >= 300 then
-        s2 = 0.01;
+        reinit(s2,assign_s2);
     end when;
 
 end BIOMD088;

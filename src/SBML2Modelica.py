@@ -6,8 +6,30 @@ import time
 import argparse
 
 
+EVENT_MODELICA_CODE = """
+class {event_name}
+
+    {inputs}
+    
+    {assign_variables}
+
+algorithm
+    {assignments}
+
+end {event_name};
+"""
+
+
 MODELICA_CODE = """
 model {model_name} "{name}"
+
+    function pow
+        input  Real x;
+        input  Real power;
+        output Real y;
+        algorithm
+            y := x^power;
+    end pow;
 
 {constant_parameters}
 
@@ -379,7 +401,7 @@ class SBMLExtrapolator:
             # Dal momento che gli and e gli or sono rappresentati come && e || allora li 
             # sostituiamo con and e or i quali sono leggibili da modelica.
             when_condition = when_condition.replace("&&", "and").replace("||", "or")
-            event_assignments = [f"{ass.getId()} = {libsbml.formulaToL3String(ass.getMath())}" for ass in event.getListOfEventAssignments()]
+            event_assignments = [f"reinit({ass.getId()},{libsbml.formulaToL3String(ass.getMath())})" for ass in event.getListOfEventAssignments()]
             self.event_dict[event_id] = Event(event_id, when_condition, event_assignments)
 
 
