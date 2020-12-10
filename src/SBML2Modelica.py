@@ -19,10 +19,10 @@ initial equation
 {initial_equations}
 
 equation
-{events}
-
 {assignment_rules}
 {rate_rules}
+
+{events}
 
 end {model_name};
 """
@@ -163,7 +163,8 @@ class SBMLModel:
                     reactant_partial = self.create_sum_from_reactant(specie_id, specie_obj)
                     reactant_formula = "- " + reactant_partial if reactant_partial != "" else reactant_partial
                     product_formula = self.create_sum_from_products(specie_id, specie_obj)
-                    rate_rule = RateRule(specie_id, f"{product_formula} {reactant_formula}")
+                    total_formula = f"{product_formula} {reactant_formula}"
+                    rate_rule = RateRule(specie_id, total_formula if total_formula.strip() != "" else "0.0")
                 self.rate_rules_dict[specie_id] = rate_rule
 
     def getconstant_parameter(self):
@@ -208,10 +209,10 @@ class SBMLTranslator:
         return [f"    {name} = {species.ivalue};" for name, species in self.model.species.items()]
     
     def getraterules_modelica_code(self):
-        return [f"    {rate_rule.lhs} = {rate_rule.rhs}" for rate_rule in self.model.rate_rules_dict.values() if rate_rule.lhs[4:-1] not in self.model.assignment_rules.keys()]
+        return [f"    {rate_rule.lhs} = {rate_rule.rhs};" for rate_rule in self.model.rate_rules_dict.values() if rate_rule.lhs[4:-1] not in self.model.assignment_rules.keys()]
 
     def getassignmentrules_modelica_code(self):
-        return [f"    {assignment_rule.lhs} = {assignment_rule.rhs}" for assignment_rule in self.model.assignment_rules.values()]
+        return [f"    {assignment_rule.lhs} = {assignment_rule.rhs};" for assignment_rule in self.model.assignment_rules.values()]
 
     def getevents_modelica_code(self):
         line_code = " "*4 + "when {when_condition} then\n"
