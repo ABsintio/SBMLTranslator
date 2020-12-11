@@ -348,12 +348,13 @@ class SBMLExtrapolator:
             list_of_parameters = list(filter(lambda x: isinstance(x, libsbml.Parameter), reaction.getListOfAllElements()))
             # Devo vedere se ci sono parametri locali alla reazione
             for param in list_of_parameters:
-                self.parameter_dict[param.getId()] = Parameter(
+                self.parameter_dict[param.getId() + "_" + reaction_name] = Parameter(
                     param.getId(), # Nome
                     param.getValue(), # Valore
                     param.getConstant() # Se è costante oppure no
                 )
                 parameters.append(param.getId())
+                kinetic_law = kinetic_law.replace(param.getId(), param.getId() + "_" + reaction_name)
             self.reaction_dict[reaction_name] = Reaction(
                 reaction_name, second_reaction_name, reactants, 
                 products, modifiers, parameters, kinetic_law
@@ -450,6 +451,7 @@ def create_run_mos(output_directory, sbml_model, file_name):
     stream.write(RUN_MOS.format(model_name=model_name,plot="\n".join(plots)))
     stream.flush()
     stream.close()
+    print(f"Created run.mos file into -> {output_directory}/run.mos")
 
 
 def check_answer(output_directory, sbml_model, file_name):
@@ -487,7 +489,7 @@ def run(file, output_directory):
     except FileExistsError:
         pass
     save_modelica(modelica_translation, modelica_file)
-    check_answer()
+    create_run_mos(save_directory, sbmlmodel, filename)
 
 
 def main():
