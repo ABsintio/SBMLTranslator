@@ -44,6 +44,14 @@ getErrorString();
 {plot}
 """
 
+BUILD_MOS = """
+loadModel(Modelica);
+loadFile("{model_name}.mo");
+getErrorString();
+buildModel({model_name}, stopTime=100.0);
+getErrorString();
+"""
+
 
 def obj2str(obj):
     args = ",".join([f"{k}={v}" for k, v in obj.__dict__.items()])
@@ -454,15 +462,16 @@ def create_run_mos(output_directory, sbml_model, file_name):
     print(f"Created run.mos file into -> {output_directory}/run.mos")
 
 
-def check_answer(output_directory, sbml_model, file_name):
-    ans = input("Do You want to create the run.mos file? [y/n] ")
-    while True:
-        if ans.lower().strip() in ["yes", "si", "y", "s"]:
-            create_run_mos(output_directory, sbml_model, file_name)
-            return
-        if ans.lower().strip() in ["n", "no"]:
-            return
-        ans = input("Do You want to create the run.mos file? [y/n] ")
+def create_build_mos(output_directory, file_name):
+    global BUILD_MOS
+    try:
+        stream = open(os.path.join(output_directory, "build.mos"), mode="x")
+    except FileExistsError:
+        stream = open(os.path.join(output_directory, "build.mos"), mode="w")
+    stream.write(BUILD_MOS.format(model_name=file_name))
+    stream.flush()
+    stream.close()
+    print(f"Created build.mos file into -> {output_directory}/build.mos")
 
 
 def run(file, output_directory):
@@ -488,8 +497,9 @@ def run(file, output_directory):
         os.mkdir(save_directory)
     except FileExistsError:
         pass
-    save_modelica(modelica_translation, modelica_file)
-    create_run_mos(save_directory, sbmlmodel, filename)
+    save_modelica(modelica_translation, modelica_file) # Salviamo il modello creato in un file Modelica
+    create_run_mos(save_directory, sbmlmodel, filename) # Creiamo il file run.mos per il plotting del risultato della simulazione
+    create_build_mos(save_directory, filename) # Creiamo il file build.mos per fare il build del modello e costruire l'esegubile per il testing
 
 
 def main():
