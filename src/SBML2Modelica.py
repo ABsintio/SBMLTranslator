@@ -6,20 +6,6 @@ import time
 import argparse
 
 
-EVENT_MODELICA_CODE = """
-class {event_name}
-
-    {inputs}
-    
-    {assign_variables}
-
-algorithm
-    {assignments}
-
-end {event_name};
-"""
-
-
 MODELICA_CODE = """
 model {model_name} "{name}"
 
@@ -47,6 +33,15 @@ equation
 {events}
 
 end {model_name};
+"""
+
+RUN_MOS = """
+loadModel(Modelica);
+loadFile("{model_name}.mo");
+getErrorString();
+simulate({model_name}, stopTime=100.0);
+getErrorString();
+{plot}
 """
 
 
@@ -438,6 +433,36 @@ def run_for_single_file(file, output_directory):
 	run(file, output_directory)
 
 
+def create_run_mos(output_directory, sbml_model, file_name):
+    """ Create run.mos file  """
+    global RUN_MOS
+    model_name = file_name
+    str_format_to_plot = "plot({%s}, externalWindow=true);\ngetErrorString();"
+    plots = []
+    variables = [rate_rule_key for rate_rule_key, rate_rule_var in sbml_model.rate_rules_dict.items() if rate_rule_var.rhs != "0.0"]
+    for i in range(0, len(variables), 4):
+        current_vars = ",".join(variables[i:i+4])
+        plots.append(str_format_to_plot % (current_vars))
+    try:
+        stream = open(os.path.join(output_directory, "run.mos"), mode="x")
+    except FileExistsError:
+        stream = open(os.path.join(output_directory, "run.mos"), mode="w")
+    stream.write(RUN_MOS.format(model_name=model_name,plot="\n".join(plots)))
+    stream.flush()
+    stream.close()
+
+
+def check_answer(output_directory, sbml_model, file_name):
+    ans = input("Do You want to create the run.mos file? [y/n] ")
+    while True:
+        if ans.lower().strip() in ["yes", "si", "y", "s"]:
+            create_run_mos(output_directory, sbml_model, file_name)
+            return
+        if ans.lower().strip() in ["n", "no"]:
+            return
+        ans = input("Do You want to create the run.mos file? [y/n] ")
+
+
 def run(file, output_directory):
     sbmlext = SBMLExtrapolator(file)
     sbmlmodel = SBMLModel(
@@ -462,6 +487,7 @@ def run(file, output_directory):
     except FileExistsError:
         pass
     save_modelica(modelica_translation, modelica_file)
+    check_answer()
 
 
 def main():
