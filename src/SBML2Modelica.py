@@ -30,6 +30,7 @@ initial equation
 equation
 {assignment_rules}
 {rate_rules}
+{zero_der}
 
 {events}
 
@@ -250,6 +251,15 @@ class SBMLTranslator:
             lines.append(code)
         return lines
     
+    def getzeroder_modelica_code(self):
+        line_code = " "*4 + "der({var})=0.0;"
+        lines = []
+        for param in self.model.parameters:
+            if not param in self.model.rate_rules_dict and not self.model.parameters[param].constant and \
+                not param in self.model.assignment_rules:
+                lines.append(line_code.format(var=param))
+        return lines
+    
     def SBML_into_Modelica(self):
         global MODELICA_CODE
         constant_parameter_list = "\n".join(self.getconstant_parameter_modelica_code())
@@ -259,9 +269,7 @@ class SBMLTranslator:
         assignmentrules_list = "\n".join(self.getassignmentrules_modelica_code())
         raterules_list = "\n".join(self.getraterules_modelica_code())
         events_list = "\n".join(self.getevents_modelica_code())
-        for comp in self.model.compartments:
-            raterules_list = raterules_list.replace(comp, "1.0")
-            assignmentrules_list = assignmentrules_list.replace(comp, "1.0")
+        zeroder_list = "\n".join(self.getzeroder_modelica_code())
         return MODELICA_CODE.format(
             model_name=self.filename,
             name=self.model.name,
@@ -271,7 +279,8 @@ class SBMLTranslator:
             initial_equations=initialequation_list,
             events=events_list,
             assignment_rules=assignmentrules_list,
-            rate_rules=raterules_list
+            rate_rules=raterules_list,
+            zero_der=zeroder_list 
         )
 
 
@@ -333,15 +342,21 @@ class SBMLExtrapolator:
         self.assignment_dict = dict()
         for rule in self.model.getListOfRules():
             if isinstance(rule, libsbml.AssignmentRule):
+                formula = rule.getFormula()
+                for comp in self.comp_dict:
+                    formula = formula.replace(comp, "1.0")
                 self.assignment_dict[rule.getVariable()] = AssignmentRule(
-                    rule.getVariable(), rule.getFormula())
+                    rule.getVariable(), formula)
     
     def _rate_rule(self):
         self.rate_dict = dict()
         for rule in self.model.getListOfRules():
             if isinstance(rule, libsbml.RateRule):
+                formula = rule.getFormula()
+                for comp in self.comp_dict:
+                    formula = formula.replace(comp, "1.0")
                 self.rate_dict[rule.getVariable()] = RateRule(
-                    rule.getVariable(), rule.getFormula()
+                    rule.getVariable(), formula
                 )
 
     def getreactions(self):
@@ -364,6 +379,8 @@ class SBMLExtrapolator:
                 )
                 parameters.append(param.getId())
                 kinetic_law = kinetic_law.replace(param.getId(), param.getId() + "_" + reaction_name)
+            for comp in self.comp_dict:
+                kinetic_law = kinetic_law.replace(comp, "1.0")
             self.reaction_dict[reaction_name] = Reaction(
                 reaction_name, second_reaction_name, reactants, 
                 products, modifiers, parameters, kinetic_law
