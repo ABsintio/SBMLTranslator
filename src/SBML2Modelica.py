@@ -4,6 +4,7 @@ import os
 import functools
 import time
 import argparse
+import math
 
 
 MODELICA_CODE = """
@@ -231,7 +232,7 @@ class SBMLTranslator:
         return [f"    Real {name};" for name in self.model.species]
 
     def getinitialequation_modelica_code(self):
-        return [f"    {name} = {species.ivalue};" for name, species in self.model.species.items()]
+        return [f"    {name} = {species.ivalue};" for name, species in self.model.species.items() if not math.isnan(species.ivalue)]
     
     def getraterules_modelica_code(self):
         return [f"    {rate_rule.lhs} = {rate_rule.rhs};" for rate_rule in self.model.rate_rules_dict.values() if rate_rule.lhs[4:-1] not in self.model.assignment_rules.keys()]
@@ -259,8 +260,8 @@ class SBMLTranslator:
         raterules_list = "\n".join(self.getraterules_modelica_code())
         events_list = "\n".join(self.getevents_modelica_code())
         for comp in self.model.compartments:
-            raterules_list = raterules_list.replace(comp + " * ", "")
-            raterules_list = raterules_list.replace(" * " + comp, "")
+            raterules_list = raterules_list.replace(comp, "1.0")
+            assignmentrules_list = assignmentrules_list.replace(comp, "1.0")
         return MODELICA_CODE.format(
             model_name=self.filename,
             name=self.model.name,
@@ -309,7 +310,7 @@ class SBMLExtrapolator:
             self.species_dict[sp.getId()] = Specie(
                 sp.getId(), # Nome
                 self.comp_dict[sp.getCompartment()], # Oggetto Compartment
-                sp.getInitialConcentration(), # Concentrazione iniziale
+                sp.getInitialConcentration() if sp.isSetInitialConcentration() else sp.getInitialAmount(), # Concentrazione iniziale
                 sp.getConstant(), # Se è costante oppure no
                 sp.getBoundaryCondition()
             )
@@ -473,6 +474,17 @@ def create_build_mos(output_directory, file_name):
     stream.close()
     print(f"Created build.mos file into -> {output_directory}/build.mos")
 
+def create_clear_sh(output_directory, file_name):
+    clear_sh = f"rm *.o *.c *.h *.json {file_name} *.mat *.makefile *.log *.libs *_init.xml"
+    try:
+        stream = open(os.path.join(output_directory, "clear.sh"), mode="x")
+    except FileExistsError:
+        stream = open(os.path.join(output_directory, "clear.sh"), mode="w")
+    stream.write(clear_sh)
+    stream.flush()
+    stream.close()
+    print(f"Created clear.sh file into -> {output_directory}/clear.sh")
+
 
 def run(file, output_directory):
     sbmlext = SBMLExtrapolator(file)
@@ -500,6 +512,7 @@ def run(file, output_directory):
     save_modelica(modelica_translation, modelica_file) # Salviamo il modello creato in un file Modelica
     create_run_mos(save_directory, sbmlmodel, filename) # Creiamo il file run.mos per il plotting del risultato della simulazione
     create_build_mos(save_directory, filename) # Creiamo il file build.mos per fare il build del modello e costruire l'esegubile per il testing
+    create_clear_sh(save_directory, filename)
 
 
 def main():
